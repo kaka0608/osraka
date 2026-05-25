@@ -28,3 +28,12 @@ __pycache__/
 # OS files
 .DS_Store
 Thumbs.db
+
+# Node.js
+node_modules/
+
+# Old Python script (migrated to Node.js)
+os-minter.py
+
+# Auth helper (sensitive, one-time use)
+git-auth.sh
