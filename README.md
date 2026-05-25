@@ -1,50 +1,57 @@
 # OpenSea FCFS Minter Bot 🚀
 
-Rust + Python bot untuk FCFS (First-Come-First-Served) NFT minting di OpenSea.
-Auto-detect collection, smart stage selection, countdown to mint.
+Node.js bot untuk FCFS NFT minting di OpenSea.
+Auto-extract slug dari URL, smart stage detection, countdown, auto-mint pas PUBLIC buka.
 
 **Made by Rakatzy. Inspired by Zun's article.**
 
 ## ✨ Features
 
-- 🔍 **Check drop** — Lihat semua stage + waktu buka (WIB) + harga
-- 🧠 **Smart wait-mint** — Otomatis deteksi allowlist vs public, countdown, mint pas buka
+- 🔗 **Paste URL** — Auto-extract slug dari `opensea.io/collection/slug`
+- 🔍 **Check drop** — Lihat semua stage + waktu buka (WIB) + harga + max per wallet + total minted
+- 🧠 **Smart auto-mint** — Cek eligibility → countdown tiap detik → mint otomatis pas PUBLIC buka
 - 🔐 **Cookie auth** — Gak perlu API key OpenSea, cukup cookie dari browser
-- 💰 **EIP-1559** — Sign and send transaction langsung dari script
+- 💰 **EIP-1559** — Sign and send transaction langsung dari script (ethers.js v6)
 - 📝 **Dry run** — Simpan calldata ke file JSON buat inspeksi
-- ⚙️ **.env support** — Private key + cookie di `.env`, gak perlu tiap kali
+- ⚙️ **.env + session** — Private key di `.env`, cookie tersimpan otomatis
 
 ## 📋 Requirements
 
-- **Python 3.11+**
-- **ETH** untuk gas (min ~0.003 ETH di Base chain)
+- **Node.js 18+** (tested on v22)
+- **ETH** untuk gas (min ~0.002 ETH di chain target)
 - **OpenSea cookie** dari browser (Chrome/Firefox DevTools)
 
 ## 🚀 Quick Start
 
-### 1. Clone & Setup
+### 1. Setup
 
 ```bash
-git clone <repo-url> os-minter
-cd os-minter
-cp .env.example .env
+cd ~/opensea-minter-bot
+npm install
 ```
 
 ### 2. Get Cookie + Private Key
 
-```bash
-# Set cookie dari browser
-./os-minter --set-cookie="os2AccessEx=YOUR_COOKIE_VALUE"
+**Cara dapetin cookie:**
+1. Buka https://opensea.io di Chrome → Login + Connect Wallet
+2. `F12` → tab **Application** (Chrome) / **Storage** (Firefox)
+3. Kiri: **Cookies** → `opensea.io`
+4. Cari `os2AccessEx` → Copy **Value**
+5. Set cookie:
 
-# Atau isi langsung di .env
-#   PRIVATE_KEY="0x..."
-#   OS_COOKIE="os2AccessEx=..."
+```bash
+./os-minter --set-cookie="os2AccessEx=COPIED_VALUE"
 ```
 
-> **Cara dapetin cookie:**
-> 1. Buka https://opensea.io di Chrome → Login + Connect Wallet
-> 2. F12 → Application → Cookies → opensea.io → `os2AccessEx` → Copy Value
-> 3. `./os-minter --set-cookie="os2AccessEx=COPIED_VALUE"`
+**Set private key:**
+```bash
+echo 'PRIVATE_KEY="0xYOUR_PRIVATE_KEY"' >> .env
+```
+
+Atau pake flag tiap jalan:
+```bash
+./os-minter -p "0x..." "url"
+```
 
 ### 3. Test Auth
 
@@ -56,34 +63,45 @@ cp .env.example .env
 ### 4. Check Drop Timing
 
 ```bash
-./os-minter -c "bad-migo" --check-drop
+./os-minter "https://opensea.io/collection/the-stiffies-962977063" --check-drop
 
 # Output:
-# Index Label      Start (WIB)           Price  Type
-#     1 GTD        25 May 20:30 WIB      0.0    Presale
-#     2 FCFS       25 May 20:45 WIB      0.0    Presale
-#     0 World      25 May 22:45 WIB      0.0005 Public
+# 📅 Drop: unknown
+#    Max per wallet: 2
+#   Idx Label             Start (WIB)        Price  Type
+# -----------------------------------------------------------------
+#     1 STIFFIES TEAM     25 May 22:00 WIB   N/A    Erc721SeaDropV1Stage
+#     2 STIFFIES WL       25 May 23:00 WIB   N/A    Erc721SeaDropV1Stage
+#     0 STIFFIES PUBLIC   26 May 01:00 WIB   N/A    Erc721SeaDropV1Stage
+#    Contract: 0xc08ae...
+#    Chain: ethereum
+#    Minted: 803
 ```
 
-### 5. Smart Wait & Auto-Mint 🎯
+### 5. Smart Auto-Mint 🎯
 
 ```bash
-# Script akan:
-# 1. Cek semua stage
-# 2. Kalo ada allowlist + kamu eligible → MINT LANGSUNG
-# 3. Kalo gak eligible → tunggu PUBLIC_SALE buka
-# 4. Kalo gak ada PUBLIC_SALE → skip (gak maksain mint)
+# Paste URL, script otomatis:
+# 1. Cek drop + eligibility
+# 2. Kalo PUBLIC buka → MINT LANGSUNG
+# 3. Kalo PUBLIC masih nanti → COUNTDOWN TIAP DETIK → mint pas buka
 
-./os-minter -c "bad-migo" --wait-mint
+./os-minter -p "0x..." "https://opensea.io/collection/the-stiffies-962977063"
 
-# Atau batasi max waktu tunggu (misal 2 jam = 7200 detik)
-./os-minter -c "bad-migo" --wait-mint --max-wait 7200
+# Output:
+# ⏳ Nunggu 'STIFFIES PUBLIC' buka jam 26 May 01:00 WIB (4418s lagi)...
+#    ⏳ ⏳ 1h 13m 32s... 1h 13m 31s... 1h 13m 30s...
+#    🚀 DIBUKA!
+#       📡 Fetching calldata...
+#       ✍️  Signing + sending...
+#       ✅ Tx sent: 0x...
+#       ✅ Confirmed in block 123456
 ```
 
 ### 6. Dry Run (Simpan Calldata)
 
 ```bash
-./os-minter -c "bad-migo" --output mint-calldata.json
+./os-minter -p "0x..." "https://opensea.io/collection/slug" --output mint-data.json
 ```
 
 ## 📖 All Commands
@@ -92,35 +110,32 @@ cp .env.example .env
 |---------|-------------|
 | `--set-cookie "val"` | Save OpenSea auth cookie |
 | `--test` | Test cookie auth |
-| `-c, --collection <slug>` | Collection slug (required for mint) |
+| `<url_or_slug>` | Positional: OpenSea URL or collection slug |
 | `-p, --private-key <key>` | Private key (or use .env) |
-| `--check-drop` | Show drop stages, timing, price |
-| `--wait-mint` | Smart wait + auto-mint |
+| `--check-drop` | Show drop stages, timing, price, supply |
 | `--max-wait <secs>` | Max wait time (default: 86400 = 24h) |
 | `--output <file>` | Save calldata as JSON (no send) |
 | `--rpc <url>` | RPC URL (default: mainnet.base.org) |
-| `--chain-id <id>` | Chain ID (default: 8453 = Base) |
-| `--set-drops-hash <hash>` | Set drops listing hash from browser |
+| `--chain-id <id>` | Chain ID (default: auto from OpenSea) |
 
 ## 📁 Files
 
 ```
 os-minter/
-├── os-minter        # Bash wrapper (auto-setup venv)
-├── os-minter.py     # Main Python script
-├── .env.example     # Config template (copy to .env)
-├── .gitignore       # .env + secrets excluded
-├── README.md        # This file
-├── src/             # Rust source (alternative)
-└── Cargo.toml       # Rust project config
+├── os-minter         # Bash wrapper
+├── os-minter.js      # Main Node.js script 🎯
+├── package.json      # Deps (ethers v6)
+├── .env              # Private key (gitignored)
+├── .env.example      # Config template
+└── README.md         # This file
 ```
 
 ## 🔬 Technical Details
 
 - **Endpoint**: `gql.opensea.io/graphql` (OpenSea internal API)
-- **Auth**: `os2AccessEx` cookie (browser session)
+- **Auth**: `os2AccessEx` cookie (browser session, valid ~30 hari)
 - **Query**: Persisted GraphQL (SHA256 hashes)
-- **Tx**: EIP-1559 via `web3.py` + `eth-account`
+- **Tx**: EIP-1559 via `ethers.js` v6
 
 ### Known Hashes
 
@@ -133,11 +148,11 @@ os-minter/
 
 ## ⚠️ Important Notes
 
-1. **ETH for gas** — Wallet needs ETH on the target chain (~0.003 ETH minimum)
-2. **Cookie expires** — Re-apply with `--set-cookie` when cookie expires
+1. **ETH for gas** — Wallet needs ETH on the target chain (~0.002 ETH minimum)
+2. **Cookie expires** — Re-apply with `--set-cookie` when cookie expires (~30 hari)
 3. **No batch mint** — Single wallet per run
 4. **EIP-1559 only** — No legacy tx support
-5. **Rust version** — Also available in `src/`, needs `cargo build`
+5. **Smart mode** — Selalu auto-detect PUBLIC stage, gak maksain mint kalo gak eligible
 
 ## 🔗 Connect
 
@@ -145,4 +160,4 @@ os-minter/
 
 ---
 
-*Built with ❤️ for the degens*
+*Built with ❤️ for the degans*
