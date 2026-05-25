@@ -1,0 +1,30 @@
+# Rust build artifacts
+/target
+Cargo.lock
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+
+# Environment & secrets
+.env
+.env.*
+# But include .env.example for documentation
+!.env.example
+
+# OS session files (contains auth cookie)
+.os-session*.json
+
+# OS config (contains private key reference)
+.os-minter.toml
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS files
+.DS_Store
+Thumbs.db

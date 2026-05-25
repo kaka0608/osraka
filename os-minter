@@ -1,0 +1,18 @@
+#!/bin/bash
+# os-minter — Wrapper untuk os-minter.py
+# Auto-activate venv, auto-install deps if missing
+
+DIR="$(cd "$(dirname "$0")" && pwd)"
+SCRIPT="$DIR/os-minter.py"
+VENV="/tmp/os-venv"
+
+# Setup venv if missing
+if [ ! -f "$VENV/bin/python3" ]; then
+    echo "🔧 Setting up Python venv..."
+    python3 -m venv "$VENV"
+    "$VENV/bin/pip" install web3 requests -q
+    echo "✅ Done"
+fi
+
+# Run
+exec "$VENV/bin/python3" "$SCRIPT" "$@"
