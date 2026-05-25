@@ -371,22 +371,44 @@ async function waitAndMint(cookie, contractAddr, chain, wallet, pk, drop, opts =
         return;
       }
       console.log(`\n⏳ Nunggu '${s.label || s.stageType || '?'}' buka jam ${fmtTime(s.startTime)} (${waitSecs}s lagi)...`);
+      let lastSupply = null;
+      let supplyCheckCount = 0;
+      let soldOut = false;
       try {
-        while (waitSecs > 0) {
+        while (waitSecs > 0 && !soldOut) {
           const hrs = Math.floor(waitSecs / 3600);
           const rem = waitSecs % 3600;
           const mins = Math.floor(rem / 60);
           const secs2 = rem % 60;
           let msg = `⏳ ${mins < 1 ? '🟢' : '⏳'} `;
           if (hrs) msg += `${hrs}h `;
-          msg += `${mins}m ${secs2}s   `;
-          process.stdout.write(`\r   ${msg}`);
+          msg += `${mins}m ${secs2}s`;
+          // Show supply if available
+          if (lastSupply !== null) msg += ` | ${lastSupply} minted`;
+          process.stdout.write(`\r   ${msg}   `);
           await sleep(Math.min(1000, waitSecs * 1000));
           waitSecs = Math.floor((s._startDt - new Date()) / 1000);
           if (waitSecs < 0) break;
+          // Every 30s check supply
+          supplyCheckCount++;
+          if (supplyCheckCount % 30 === 0) {
+            const newSupply = await fetchTotalMinted(contractAddr, chain);
+            if (newSupply !== null) {
+              if (lastSupply !== null && newSupply === lastSupply && waitSecs <= 0) {
+                // Stage buka tapi supply gak nambah → sold out
+                soldOut = true;
+              }
+              lastSupply = newSupply;
+            }
+          }
         }
       } catch {
         console.log('\n   ⏹ Batal');
+        return;
+      }
+      if (soldOut) {
+        console.log('\n   ❌ SOLD OUT! Total minted stuck di ' + lastSupply);
+        console.log('   Countdown dihentikan.');
         return;
       }
       console.log('\n   🚀 DIBUKA!');
@@ -410,22 +432,41 @@ async function waitAndMint(cookie, contractAddr, chain, wallet, pk, drop, opts =
         return;
       }
       console.log(`\n⏳ Nunggu PUBLIC buka jam ${fmtTime(publicStage.startTime)} (${waitSecs}s lagi)...`);
+      let lastSupply = null;
+      let supplyCheckCount = 0;
+      let soldOut = false;
       try {
-        while (waitSecs > 0) {
+        while (waitSecs > 0 && !soldOut) {
           const hrs = Math.floor(waitSecs / 3600);
           const rem = waitSecs % 3600;
           const mins = Math.floor(rem / 60);
           const secs2 = rem % 60;
           let msg = `⏳ ${mins < 1 ? '🟢' : '⏳'} `;
           if (hrs) msg += `${hrs}h `;
-          msg += `${mins}m ${secs2}s   `;
-          process.stdout.write(`\r   ${msg}`);
+          msg += `${mins}m ${secs2}s`;
+          if (lastSupply !== null) msg += ` | ${lastSupply} minted`;
+          process.stdout.write(`\r   ${msg}   `);
           await sleep(Math.min(1000, waitSecs * 1000));
           waitSecs = Math.floor((publicStage._startDt - new Date()) / 1000);
           if (waitSecs < 0) break;
+          supplyCheckCount++;
+          if (supplyCheckCount % 30 === 0) {
+            const newSupply = await fetchTotalMinted(contractAddr, chain);
+            if (newSupply !== null) {
+              if (lastSupply !== null && newSupply === lastSupply && waitSecs <= 0) {
+                soldOut = true;
+              }
+              lastSupply = newSupply;
+            }
+          }
         }
       } catch {
         console.log('\n   ⏹ Batal');
+        return;
+      }
+      if (soldOut) {
+        console.log('\n   ❌ SOLD OUT! Total minted stuck di ' + lastSupply);
+        console.log('   Countdown dihentikan.');
         return;
       }
       console.log('\n   🚀 PUBLIC DIBUKA!');
@@ -442,7 +483,15 @@ async function mintNow(cookie, contractAddr, chain, wallet, pk, stage, opts = {}
   const price = stage.price?.token?.unit || '?';
   console.log(`\n🚀 MINT '${label}' (${price} ETH)!`);
 
-  const txData = await fetchCalldata(cookie, wallet.address, contractAddr, chain);
+  const txData = await fetchCalldata(cookie, wallet.address, contractAddr, chain).catch(e => {
+    if (e.code === 'SoldOutError' || e.message?.includes('sold out') || e.message?.includes('SoldOut')) {
+      console.log('   ❌ SOLD OUT! Semua udah ke-mint.');
+      return null;
+    }
+    throw e;
+  });
+  if (!txData) return;
+
   console.log(`   To: ${txData.to.slice(0, 20)}...`);
   console.log(`   Data: ${txData.data.slice(0, 40)}...`);
   console.log(`   Value: ${txData.value}`);
@@ -518,7 +567,7 @@ async function main() {
 
   // Set cookie mode
   if (args.setCookie) {
-    let cookieStr = args.setCookie;
+    let cookieStr = args.setCookie.replace(/\s+/g, '');
     if (!cookieStr.startsWith('os2AccessEx=')) {
       cookieStr = `os2AccessEx=${cookieStr}`;
     }
