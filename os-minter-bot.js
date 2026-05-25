@@ -27,7 +27,7 @@ const TOKEN=process.env.TELEGRAM_BOT_TOKEN||'';
 if(!TOKEN){console.error('❌ TELEGRAM_BOT_TOKEN not set');process.exit(1);}
 const ENCRYPT_PASS=process.env.WALLET_ENCRYPT_KEY||null;
 
-import{fetchDropInfo,fetchCalldata,resolveContractAddress,fetchTotalMinted,fetchStageTypes,findPublicStage,validateCookie,getCookie,fmtTime,sleep,signAndSend}from'./os-minter.js';
+import{fetchDropInfo,fetchCalldata,resolveContractAddress,fetchTotalMinted,fetchStageTypes,findPublicStage,validateCookie,getCookie,fmtTime,sleep,signAndSend,fetchCollectionStats}from'./os-minter.js';
 
 // ─── Storage ────────────────────────────────────────────────
 function loadJSON(p){try{return JSON.parse(fs.readFileSync(p,'utf-8'))}catch{return {}}}
