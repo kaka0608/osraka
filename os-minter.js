@@ -93,6 +93,17 @@ function getCookie() {
   return process.env.OS_COOKIE || '';
 }
 
+// ─── Exports (for bot / module use) ───────────────────────
+
+export {
+  fetchDropInfo, fetchCalldata, resolveContractAddress,
+  fetchTotalMinted, fetchStageTypes, findPublicStage,
+  waitAndMint, mintNow, signAndSend, validateCookie,
+  printDrop, fmtTime, sleep, getCookie, loadSession, saveSession,
+  loadEnv, extractSlug, GRAPHQL_URL, SWAP_HASH, DROP_HASH,
+  HEADERS, WIB_OFFSET, SESSION_PATH, ENV_PATH,
+};
+
 // ─── GraphQL ────────────────────────────────────────────────
 
 async function gqlRequest(cookie, queryData, opType = 'query') {
@@ -563,6 +574,15 @@ function parseArgs() {
 }
 
 // ─── Main ──────────────────────────────────────────────────
+// Only run CLI when executed directly (not when imported as module)
+const __filename = fileURLToPath(import.meta.url);
+const isMain = process.argv[1] && (
+  process.argv[1] === __filename ||
+  process.argv[1].endsWith('os-minter.js') ||
+  process.argv[1].endsWith('/os-minter')
+);
+
+if (isMain) {
 
 async function main() {
   const args = parseArgs();
@@ -731,3 +751,4 @@ main().catch(err => {
   console.error('❌ Fatal:', err.message || err);
   process.exit(1);
 });
+}
