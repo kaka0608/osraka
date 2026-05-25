@@ -442,13 +442,9 @@ bot.onText(/^\/stats(?:\s+(.+))?$/i,async(m,match)=>{
     const stats=await fetchCollectionStats(cookie,slug);
     if(!stats)return bot.sendMessage(cid,`❌ Gagal ambil stats untuk ${code(slug)}`,{parse_mode:'HTML'});
     
-    // Try to get contract + chain too
-    let contractStr='', chainStr='';
-    try{
-      const {contract,chain}=await resolveContractAddress(cookie,slug);
-      contractStr=`\n📄 ${bold('Contract:')} ${code(addrShort(contract))}`;
-      chainStr=`\n⛓️ ${bold('Chain:')} ${chain.toUpperCase()}`;
-    }catch{}
+    // Contract & chain from stats (already fetched)
+    let contractStr=`\n📄 ${bold('Contract:')} ${code(addrShort(stats.contract))}`;
+    let chainStr=`\n⛓️ ${bold('Chain:')} ${(stats.chain||'base').toUpperCase()}`;
 
 let out=`📊 ${bold(slug.toUpperCase())}\n`;
     out += `━━━━━━━━━━━━━━━━━━━━\n`;
@@ -456,7 +452,9 @@ let out=`📊 ${bold(slug.toUpperCase())}\n`;
     // Floor price
     const fp=stats.floorPrice;
     out += `💵 ${bold('Floor:')} ${fp>0?fp.toLocaleString(undefined,{maximumFractionDigits:4}):'?'} ${stats.floorSymbol||'ETH'}`;
-    // Top offer approximation from cheapest listing - skip for now
+    // Top offer
+    const to=stats.topOffer;
+    if(to>0)out+=` | 💰 ${bold('Top Offer:')} ${to.toLocaleString(undefined,{maximumFractionDigits:4})} ${stats.topOfferSymbol||'ETH'}`;
     out += `\n`;
 
     // Volume

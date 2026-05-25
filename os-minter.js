@@ -218,67 +218,89 @@ async function fetchStageTypes(cookie, slug, address) {
 
 // ─── Collection Stats (floor, volume, holders) ────────────────
 async function fetchCollectionStats(cookie, slug) {
-  // Use OpenSea v2 REST API for collection stats
+  // Use cookie-based OpenSea v2 API for stats (no API key needed!)
+  let statsData = null;
   try {
     const resp = await fetch(`https://api.opensea.io/api/v2/collections/${slug}/stats`, {
       headers: {
         accept: 'application/json',
+        cookie,
         'user-agent': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36',
-        'x-api-key': '',
       },
     });
-    if (resp.status === 200) {
+    if (resp.ok) {
       const json = await resp.json();
       const t = json.total || {};
-      return {
-        floorPrice: t.floor_price || 0,
-        floorSymbol: t.floor_price_symbol || 'ETH',
+      statsData = {
         volume: t.volume || 0,
-        volumeSymbol: t.volume_symbol || 'ETH',
         sales: t.sales || 0,
         numOwners: t.num_owners || 0,
-        totalSupply: t.total_supply || 0,
-        marketCap: t.market_cap || 0,
-        averagePrice: t.average_price || 0,
+        floorPrice: t.floor_price || 0,
+        floorSymbol: t.floor_price_symbol || 'ETH',
       };
     }
   } catch {}
 
-  // Fallback: try GraphQL for collection stats
+  // Get contract + floor + topOffer from GraphQL
+  let contract = '', chain = 'base', topOffer = 0, topOfferSymbol = 'ETH', totalSupply = 0;
   try {
     const { data } = await gqlRequest(cookie, {
-      query: `query CollectionStats($slug: String!) {
-        collectionBySlug(slug: $slug) {
-          stats {
-            totalVolume
-            totalSupply
-            numOwners
-            floorPrice {
-              amount
-              currency
-            }
-          }
-        }
-      }`,
-      variables: { slug },
+      extensions: { persistedQuery: { sha256Hash: COLLECTION_ITEMS_HASH, version: 1 } },
+      operationName: 'CollectionItemsListQuery',
+      variables: {
+        collectionSlug: slug,
+        limit: 1,
+        sort: { by: 'PRICE', direction: 'ASC' },
+      },
     });
-    const s = data?.data?.collectionBySlug?.stats;
-    if (s) {
-      return {
-        floorPrice: s.floorPrice?.amount || 0,
-        floorSymbol: s.floorPrice?.currency || 'ETH',
-        volume: s.totalVolume || 0,
-        volumeSymbol: 'ETH',
-        sales: 0,
-        numOwners: s.numOwners || 0,
-        totalSupply: s.totalSupply || 0,
-        marketCap: 0,
-        averagePrice: 0,
-      };
+    const items = data?.data?.collectionItems?.items || [];
+    if (items.length) {
+      contract = items[0].contractAddress;
+      chain = items[0].chain?.identifier || 'base';
+
+      // Floor from cheapest listing
+      if (!statsData && items[0].bestListing?.pricePerItem?.token?.unit) {
+        statsData = statsData || {};
+        statsData.floorPrice = parseFloat(items[0].bestListing.pricePerItem.token.unit);
+        statsData.floorSymbol = items[0].bestListing.pricePerItem.token.symbol || 'ETH';
+      }
+
+      // Best offer on cheapest item
+      if (items[0].bestOffer?.price?.amount) {
+        topOffer = parseFloat(items[0].bestOffer.price.amount);
+        topOfferSymbol = items[0].bestOffer.price.symbol || 'ETH';
+      }
+
+      // Collection-level top offer
+      if (!topOffer && items[0].collection?.topOffer?.amount) {
+        topOffer = parseFloat(items[0].collection.topOffer.amount);
+        topOfferSymbol = items[0].collection.topOffer.symbol || 'ETH';
+      }
     }
   } catch {}
 
-  return null;
+  if (!contract) return null;
+
+  // Total supply from on-chain fallback
+  if (!statsData || !statsData.totalSupply) {
+    totalSupply = await fetchTotalMinted(contract, chain) || 0;
+  }
+
+  return {
+    floorPrice: statsData?.floorPrice || 0,
+    floorSymbol: statsData?.floorSymbol || 'ETH',
+    volume: statsData?.volume || 0,
+    volumeSymbol: 'ETH',
+    sales: statsData?.sales || 0,
+    numOwners: statsData?.numOwners || 0,
+    topOffer,
+    topOfferSymbol,
+    totalSupply: statsData?.totalSupply || totalSupply,
+    marketCap: (statsData?.floorPrice || 0) * (statsData?.totalSupply || totalSupply || 0),
+    averagePrice: 0,
+    contract,
+    chain,
+  };
 }
 
 // ─── Helpers ────────────────────────────────────────────────
