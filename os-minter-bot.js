@@ -27,7 +27,7 @@ const TOKEN=process.env.TELEGRAM_BOT_TOKEN||'';
 if(!TOKEN){console.error('❌ TELEGRAM_BOT_TOKEN not set');process.exit(1);}
 const ENCRYPT_PASS=process.env.WALLET_ENCRYPT_KEY||null;
 
-import{fetchDropInfo,fetchCalldata,resolveContractAddress,fetchTotalMinted,fetchStageTypes,findPublicStage,validateCookie,getCookie,fmtTime,sleep,signAndSend,fetchCollectionStats}from'./os-minter.js';
+import{fetchDropInfo,fetchCalldata,resolveContractAddress,fetchTotalMinted,fetchStageTypes,findPublicStage,validateCookie,getCookie,fmtTime,sleep,signAndSend,fetchCollectionStats,transferNFT,fetchBestOffer,fetchUserNFTs}from'./os-minter.js';
 
 // ─── Storage ────────────────────────────────────────────────
 function loadJSON(p){try{return JSON.parse(fs.readFileSync(p,'utf-8'))}catch{return {}}}
@@ -333,7 +333,11 @@ async function showHelp(cid){
     `Klik "📡 Auto Scan" atau lihat notifikasi otomatis.\n\n`+
 `${bold('5. Lihat Stats NFT')}\n`+
     `/stats https://... — liat floor price, volume, holder, supply.\n\n`+
-    `${bold('6. Lainnya')}\n`+
+    `${bold('6. Manage NFT')}\n`+
+    `/send <slug> <tokenId> <addr> — kirim NFT ke alamat lain.\n`+
+    `/offers <slug> <tokenId> — liat best offer di NFT.\n`+
+    `/myitems <slug> — daftar NFT kamu + offer.\n\n`+
+    `${bold('7. Lainnya')}\n`+
     `/cancel — stop mint.\n`+
     `/history — liat riwayat mint.\n`+
     `/status — status wallet + gas price + scan info.\n\n`+
@@ -483,6 +487,83 @@ let out=`📊 ${bold(slug.toUpperCase())}\n`;
       out += `\n⛽ ${gas}`;
     }catch{}
 
+    await bot.sendMessage(cid,out,menuKb());
+  }catch(e){await bot.sendMessage(cid,`❌ ${esc(e.message.slice(0,200))}`,menuKb());}
+});
+
+// ─── /send ───────────────────────────────────────────────────
+bot.onText(/^\/send(?:\s+(.+))?$/i,async(m,match)=>{
+  const cid=m.chat.id;logUser(m);incUserCmd(m);
+  const raw=match?.[1]?.trim();
+  if(!raw)return bot.sendMessage(cid,'❌ /send <slug> <tokenId> <address>\nContoh: /send mukanjo 80 0xabcd...',{parse_mode:'HTML'});
+  const parts=raw.split(/\s+/);
+  const slug=extractSlug(parts[0]);
+  if(!slug||!parts[1]||!parts[2])return bot.sendMessage(cid,'❌ /send <slug> <tokenId> <address>',{parse_mode:'HTML'});
+  const tokenId=parts[1],toAddr=parts[2];
+  const uw=getUserWallet(cid);
+  if(!uw)return bot.sendMessage(cid,'❌ Belum register wallet. /register 0x...',{parse_mode:'HTML'});
+  const pk=decryptWallet(uw.privateKey);
+  const msg=await bot.sendMessage(cid,`📤 ${bold('Sending')} #${tokenId} → ${code(toAddr.slice(0,6)+'…'+toAddr.slice(-4))}...`,{parse_mode:'HTML'});
+  try{
+    const cookie=getCookie();
+    const {contract,chain}=await resolveContractAddress(cookie,slug);
+    const txHash=await transferNFT(pk,contract,tokenId,toAddr,chain);
+    await bot.sendMessage(cid,`✅ ${bold('Sent!')}\nTX: ${code(txHash)}\n#${tokenId} ${bold(slug)} → ${code(toAddr.slice(0,6)+'…'+toAddr.slice(-4))}`,resultKb(txHash,chain));
+  }catch(e){await bot.sendMessage(cid,`❌ ${esc(e.message.slice(0,200))}`,menuKb());}
+});
+
+// ─── /offers ─────────────────────────────────────────────────
+bot.onText(/^\/offers(?:\s+(.+))?$/i,async(m,match)=>{
+  const cid=m.chat.id;logUser(m);incUserCmd(m);
+  const raw=match?.[1]?.trim();
+  if(!raw)return bot.sendMessage(cid,'❌ /offers <slug> <tokenId>\nContoh: /offers mukanjo 80',{parse_mode:'HTML'});
+  const parts=raw.split(/\s+/);
+  const slug=extractSlug(parts[0]);
+  if(!slug||!parts[1])return bot.sendMessage(cid,'❌ /offers <slug> <tokenId>',{parse_mode:'HTML'});
+  const tokenId=parts[1];
+  await bot.sendMessage(cid,`🔍 Cek offer ${bold(slug)} #${tokenId}...`,{parse_mode:'HTML'});
+  try{
+    const cookie=getCookie();
+    if(!cookie||!await validateCookie(cookie))return bot.sendMessage(cid,'❌ Cookie expired!',{parse_mode:'HTML'});
+    const offer=await fetchBestOffer(cookie,slug,tokenId);
+    if(!offer)return bot.sendMessage(cid,`Tidak ada offer aktif untuk ${bold(slug)} #${tokenId}`,menuKb());
+    let out=`💰 ${bold('Best Offer')}\n`;
+    out += `━━━━━━━━━━━━━━━━━━━━\n`;
+    out += `${bold(slug)} #${offer.tokenId}\n`;
+    out += `💵 ${bold('Price:')} ${offer.price} ${offer.symbol}\n`;
+    out += `👤 ${bold('Buyer:')} ${code(offer.maker.slice(0,6)+'…'+offer.maker.slice(-4))}\n`;
+    const {chain}=await resolveContractAddress(cookie,slug);
+    out += `⛓️ ${chain.toUpperCase()}`;
+    await bot.sendMessage(cid,out,menuKb());
+  }catch(e){await bot.sendMessage(cid,`❌ ${esc(e.message.slice(0,200))}`,menuKb());}
+});
+
+// ─── /myitems ────────────────────────────────────────────────
+bot.onText(/^\/myitems(?:\s+(.+))?$/i,async(m,match)=>{
+  const cid=m.chat.id;logUser(m);incUserCmd(m);
+  const raw=match?.[1]?.trim();
+  const uw=getUserWallet(cid);
+  if(!uw)return bot.sendMessage(cid,'❌ Belum register. /register 0x...',{parse_mode:'HTML'});
+  const pk=decryptWallet(uw.privateKey);
+  if(!raw)return bot.sendMessage(cid,'❌ /myitems <slug>\nContoh: /myitems mukanjo',{parse_mode:'HTML'});
+  const slug=extractSlug(raw);
+  if(!slug)return bot.sendMessage(cid,'❌ Invalid slug',{parse_mode:'HTML'});
+  await bot.sendMessage(cid,`🔍 Ambil daftar NFT ${bold(slug)}...`,{parse_mode:'HTML'});
+  try{
+    const cookie=getCookie();
+    const {contract,chain}=await resolveContractAddress(cookie,slug);
+    const nfts=await fetchUserNFTs(pk,contract,chain,10);
+    if(!nfts.length)return bot.sendMessage(cid,`Tidak punya NFT ${bold(slug)}`,menuKb());
+    // Check offers for each
+    let out=`📦 ${bold('NFTs kamu - '+slug)}\n━━━━━━━━━━━━━━━━━━━━\n`;
+    for(const n of nfts){
+      const off=await fetchBestOffer(cookie,slug,String(n.tokenId));
+      out += `#${n.tokenId}`;
+      if(off)out+=` 💰 ${off.price} ${off.symbol}`;
+      else out+=` ❌ no offer`;
+      out += `\n`;
+    }
+    out += `\nKetik /offers ${slug} <id> utk detail`;
     await bot.sendMessage(cid,out,menuKb());
   }catch(e){await bot.sendMessage(cid,`❌ ${esc(e.message.slice(0,200))}`,menuKb());}
 });

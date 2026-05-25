@@ -99,7 +99,8 @@ export {
   fetchDropInfo, fetchCalldata, resolveContractAddress,
   fetchTotalMinted, fetchStageTypes, findPublicStage,
   waitAndMint, mintNow, signAndSend, validateCookie,
-  fetchCollectionStats, printDrop, fmtTime, sleep, getCookie, loadSession, saveSession,
+  fetchCollectionStats, transferNFT, fetchBestOffer, fetchUserNFTs,
+  printDrop, fmtTime, sleep, getCookie, loadSession, saveSession,
   loadEnv, extractSlug, GRAPHQL_URL, SWAP_HASH, DROP_HASH,
   HEADERS, WIB_OFFSET, SESSION_PATH, ENV_PATH,
 };
@@ -266,15 +267,15 @@ async function fetchCollectionStats(cookie, slug) {
       }
 
       // Best offer on cheapest item
-      if (items[0].bestOffer?.price?.amount) {
-        topOffer = parseFloat(items[0].bestOffer.price.amount);
-        topOfferSymbol = items[0].bestOffer.price.symbol || 'ETH';
+      if (items[0].bestOffer?.pricePerItem?.token?.unit) {
+        topOffer = parseFloat(items[0].bestOffer.pricePerItem.token.unit);
+        topOfferSymbol = items[0].bestOffer.pricePerItem.token.symbol || 'ETH';
       }
 
       // Collection-level top offer
-      if (!topOffer && items[0].collection?.topOffer?.amount) {
-        topOffer = parseFloat(items[0].collection.topOffer.amount);
-        topOfferSymbol = items[0].collection.topOffer.symbol || 'ETH';
+      if (!topOffer && items[0].collection?.topOffer?.pricePerItem?.token?.unit) {
+        topOffer = parseFloat(items[0].collection.topOffer.pricePerItem.token.unit);
+        topOfferSymbol = items[0].collection.topOffer.pricePerItem.token.symbol || 'ETH';
       }
     }
   } catch {}
@@ -301,6 +302,93 @@ async function fetchCollectionStats(cookie, slug) {
     contract,
     chain,
   };
+}
+
+// ─── NFT Transfer ────────────────────────────────────────────
+async function transferNFT(pk, contract, tokenId, to, chain = 'base') {
+  const rpcMap = {
+    ethereum: 'https://ethereum-rpc.publicnode.com',
+    base: 'https://mainnet.base.org',
+    polygon: 'https://polygon-rpc.com',
+    arbitrum: 'https://arb1.arbitrum.io/rpc',
+    optimism: 'https://mainnet.optimism.io',
+    zora: 'https://rpc.zora.energy',
+    avalanche: 'https://api.avax.network/ext/bc/C/rpc',
+    'bnb-chain': 'https://bsc-dataseed.binance.org',
+  };
+  const rpc = rpcMap[chain] || 'https://mainnet.base.org';
+  const provider = new ethers.JsonRpcProvider(rpc);
+  const wallet = new ethers.Wallet(pk, provider);
+  const erc721 = new ethers.Contract(contract, [
+    'function safeTransferFrom(address from, address to, uint256 tokenId)',
+  ], wallet);
+  const owner = await wallet.getAddress();
+  const tx = await erc721.safeTransferFrom(owner, to, tokenId);
+  await tx.wait();
+  return tx.hash;
+}
+
+// ─── Fetch best offer on NFT ─────────────────────────────────
+async function fetchBestOffer(cookie, slug, tokenId) {
+  try {
+    const { data } = await gqlRequest(cookie, {
+      extensions: { persistedQuery: { sha256Hash: COLLECTION_ITEMS_HASH, version: 1 } },
+      operationName: 'CollectionItemsListQuery',
+      variables: {
+        collectionSlug: slug,
+        limit: 1,
+        tokenIds: [String(tokenId)],
+        sort: { by: 'PRICE', direction: 'ASC' },
+      },
+    });
+    const items = data?.data?.collectionItems?.items || [];
+    if (!items.length) return null;
+    const item = items[0];
+    const bo = item.bestOffer;
+    if (!bo?.pricePerItem?.token?.unit) return null;
+    return {
+      tokenId: item.tokenId,
+      name: item.name || `#${item.tokenId}`,
+      price: parseFloat(bo.pricePerItem.token.unit),
+      symbol: bo.pricePerItem.token.symbol || 'ETH',
+      maker: bo.maker?.address || '?',
+      contract: item.contractAddress,
+      chain: item.chain?.identifier || 'base',
+    };
+  } catch {}
+  return null;
+}
+
+// ─── User's NFTs (on-chain lookup) ──────────────────────────
+async function fetchUserNFTs(pk, contract, chain = 'base', limit = 20) {
+  const rpcMap = {
+    ethereum: 'https://ethereum-rpc.publicnode.com',
+    base: 'https://mainnet.base.org',
+    polygon: 'https://polygon-rpc.com',
+    arbitrum: 'https://arb1.arbitrum.io/rpc',
+    optimism: 'https://mainnet.optimism.io',
+    zora: 'https://rpc.zora.energy',
+    avalanche: 'https://api.avax.network/ext/bc/C/rpc',
+    'bnb-chain': 'https://bsc-dataseed.binance.org',
+  };
+  const rpc = rpcMap[chain] || 'https://mainnet.base.org';
+  const provider = new ethers.JsonRpcProvider(rpc);
+  const wallet = new ethers.Wallet(pk, provider);
+  const address = wallet.address;
+  const erc721 = new ethers.Contract(contract, [
+    'function balanceOf(address owner) view returns (uint256)',
+    'function tokenOfOwnerByIndex(address owner, uint256 index) view returns (uint256)',
+  ], provider);
+  const nfts = [];
+  try {
+    const balance = Number(await erc721.balanceOf(address));
+    const count = Math.min(balance, limit);
+    for (let i = 0; i < count; i++) {
+      const tid = Number(await erc721.tokenOfOwnerByIndex(address, i));
+      nfts.push({ tokenId: tid, contract, chain });
+    }
+  } catch {}
+  return nfts;
 }
 
 // ─── Helpers ────────────────────────────────────────────────
