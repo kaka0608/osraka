@@ -99,7 +99,7 @@ export {
   fetchDropInfo, fetchCalldata, resolveContractAddress,
   fetchTotalMinted, fetchStageTypes, findPublicStage,
   waitAndMint, mintNow, signAndSend, validateCookie,
-  printDrop, fmtTime, sleep, getCookie, loadSession, saveSession,
+  fetchCollectionStats, printDrop, fmtTime, sleep, getCookie, loadSession, saveSession,
   loadEnv, extractSlug, GRAPHQL_URL, SWAP_HASH, DROP_HASH,
   HEADERS, WIB_OFFSET, SESSION_PATH, ENV_PATH,
 };
@@ -214,6 +214,71 @@ async function fetchStageTypes(cookie, slug, address) {
     variables: { address: address.toLowerCase(), collectionSlug: slug },
   });
   return data?.data?.dropBySlug || null;
+}
+
+// ─── Collection Stats (floor, volume, holders) ────────────────
+async function fetchCollectionStats(cookie, slug) {
+  // Use OpenSea v2 REST API for collection stats
+  try {
+    const resp = await fetch(`https://api.opensea.io/api/v2/collections/${slug}/stats`, {
+      headers: {
+        accept: 'application/json',
+        'user-agent': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36',
+        'x-api-key': '',
+      },
+    });
+    if (resp.status === 200) {
+      const json = await resp.json();
+      const t = json.total || {};
+      return {
+        floorPrice: t.floor_price || 0,
+        floorSymbol: t.floor_price_symbol || 'ETH',
+        volume: t.volume || 0,
+        volumeSymbol: t.volume_symbol || 'ETH',
+        sales: t.sales || 0,
+        numOwners: t.num_owners || 0,
+        totalSupply: t.total_supply || 0,
+        marketCap: t.market_cap || 0,
+        averagePrice: t.average_price || 0,
+      };
+    }
+  } catch {}
+
+  // Fallback: try GraphQL for collection stats
+  try {
+    const { data } = await gqlRequest(cookie, {
+      query: `query CollectionStats($slug: String!) {
+        collectionBySlug(slug: $slug) {
+          stats {
+            totalVolume
+            totalSupply
+            numOwners
+            floorPrice {
+              amount
+              currency
+            }
+          }
+        }
+      }`,
+      variables: { slug },
+    });
+    const s = data?.data?.collectionBySlug?.stats;
+    if (s) {
+      return {
+        floorPrice: s.floorPrice?.amount || 0,
+        floorSymbol: s.floorPrice?.currency || 'ETH',
+        volume: s.totalVolume || 0,
+        volumeSymbol: 'ETH',
+        sales: 0,
+        numOwners: s.numOwners || 0,
+        totalSupply: s.totalSupply || 0,
+        marketCap: 0,
+        averagePrice: 0,
+      };
+    }
+  } catch {}
+
+  return null;
 }
 
 // ─── Helpers ────────────────────────────────────────────────

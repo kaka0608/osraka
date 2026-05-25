@@ -215,7 +215,8 @@ function menuKb(a){
     [{text:'📋 Check Drop',callback_data:'menu_check'}],
     [{text:'🆕 Buat Wallet Baru',callback_data:'menu_create_wallet'}],
     [{text:'👥 Users',callback_data:'menu_users'},{text:'📊 Status',callback_data:'menu_status'}],
-    [{text:'📡 Auto Scan',callback_data:'menu_scan'},{text:'📜 History',callback_data:'menu_history'}],
+    [{text:'📡 Auto Scan',callback_data:'menu_scan'},{text:'📊 Stats',callback_data:'menu_stats'}],
+    [{text:'📜 History',callback_data:'menu_history'}],
     [{text:'❓ Bantuan',callback_data:'menu_help'}],
   ];
   if(a)k.push(...a);
@@ -244,6 +245,7 @@ bot.on('callback_query',async(q)=>{
   else if(q.data==='menu_help'){showHelp(cid);}
   else if(q.data==='menu_favs'){showFavs(cid);}
   else if(q.data==='menu_scan'){showScan(cid);}
+else if(q.data==='menu_stats'){bot.sendMessage(cid,`📊 ${bold('Stats Koleksi')}\n\nKirim URL/slug:\n/stats https://opensea.io/collection/...`,{parse_mode:'HTML'});}
 });
 
 async function doCreateWallet(cid){
@@ -329,7 +331,9 @@ async function showHelp(cid){
     `${bold('4. Auto Scan Drops')}\n`+
     `Bot otomatis scan OpenSea tiap 30 menit cari FCFS drop baru.\n`+
     `Klik "📡 Auto Scan" atau lihat notifikasi otomatis.\n\n`+
-    `${bold('5. Lainnya')}\n`+
+`${bold('5. Lihat Stats NFT')}\n`+
+    `/stats https://... — liat floor price, volume, holder, supply.\n\n`+
+    `${bold('6. Lainnya')}\n`+
     `/cancel — stop mint.\n`+
     `/history — liat riwayat mint.\n`+
     `/status — status wallet + gas price + scan info.\n\n`+
@@ -418,6 +422,69 @@ bot.onText(/^\/check(?:\s+(.+))?$/i,async(m,match)=>{
       const open=s.startTime?new Date(s.startTime.replace('Z','+00:00'))<=new Date():false;
       out+=`${open?'🟢':'⏳'} ${bold(label)} — ${price} ETH\n   ${t} | #${s.stageIndex}\n`;
     }
+    await bot.sendMessage(cid,out,menuKb());
+  }catch(e){await bot.sendMessage(cid,`❌ ${esc(e.message.slice(0,200))}`,menuKb());}
+});
+
+// ─── /stats ─────────────────────────────────────────────────
+bot.onText(/^\/stats(?:\s+(.+))?$/i,async(m,match)=>{
+  const cid=m.chat.id;logUser(m);incUserCmd(m);
+  const raw=match?.[1]?.trim();
+  if(!raw)return bot.sendMessage(cid,'❌ /stats <url atau slug>',{parse_mode:'HTML'});
+  const slug=extractSlug(raw);
+  if(!slug)return bot.sendMessage(cid,'❌ Invalid slug',{parse_mode:'HTML'});
+  await bot.sendMessage(cid,`📊 ${bold(slug)} — fetching stats...`,{parse_mode:'HTML'});
+  try{
+    const cookie=getCookie();
+    if(!cookie||!await validateCookie(cookie))return bot.sendMessage(cid,'❌ Cookie expired!',{parse_mode:'HTML'});
+    
+    // Fetch stats
+    const stats=await fetchCollectionStats(cookie,slug);
+    if(!stats)return bot.sendMessage(cid,`❌ Gagal ambil stats untuk ${code(slug)}`,{parse_mode:'HTML'});
+    
+    // Try to get contract + chain too
+    let contractStr='', chainStr='';
+    try{
+      const {contract,chain}=await resolveContractAddress(cookie,slug);
+      contractStr=`\n📄 ${bold('Contract:')} ${code(addrShort(contract))}`;
+      chainStr=`\n⛓️ ${bold('Chain:')} ${chain.toUpperCase()}`;
+    }catch{}
+
+let out=`📊 ${bold(slug.toUpperCase())}\n`;
+    out += `━━━━━━━━━━━━━━━━━━━━\n`;
+
+    // Floor price
+    const fp=stats.floorPrice;
+    out += `💵 ${bold('Floor:')} ${fp>0?fp.toLocaleString(undefined,{maximumFractionDigits:4}):'?'} ${stats.floorSymbol||'ETH'}`;
+    // Top offer approximation from cheapest listing - skip for now
+    out += `\n`;
+
+    // Volume
+    out += `📈 ${bold('Volume:')} ${stats.volume>0?stats.volume.toLocaleString(undefined,{maximumFractionDigits:2}):'?'} ${stats.volumeSymbol||'ETH'}`;
+    if(stats.sales>0)out+=` (${stats.sales.toLocaleString()} sales)`;
+    out += `\n`;
+
+    // Average price
+    if(stats.averagePrice>0)out+=`📊 ${bold('Avg Price:')} ${stats.averagePrice.toLocaleString(undefined,{maximumFractionDigits:4})} ETH\n`;
+
+    // Holders / Supply
+    out += `👥 ${bold('Holders:')} ${stats.numOwners>0?stats.numOwners.toLocaleString():'?'}`;
+    if(stats.totalSupply>0)out+=` / ${bold('Supply:')} ${stats.totalSupply.toLocaleString()}`;
+    out += `\n`;
+
+    // Market cap
+    if(stats.marketCap>0)out+=`🏦 ${bold('Market Cap:')} ${stats.marketCap.toLocaleString(undefined,{maximumFractionDigits:2})} ETH\n`;
+
+    // Contract & chain
+    out += contractStr+chainStr;
+
+    // Gas estimate
+    try{
+      const chain=chainStr?chainStr.trim().split(' ').pop():'base';
+      const gas=await getGasPrice(chain.toLowerCase());
+      out += `\n⛽ ${gas}`;
+    }catch{}
+
     await bot.sendMessage(cid,out,menuKb());
   }catch(e){await bot.sendMessage(cid,`❌ ${esc(e.message.slice(0,200))}`,menuKb());}
 });
