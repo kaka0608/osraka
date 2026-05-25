@@ -99,7 +99,7 @@ export {
   fetchDropInfo, fetchCalldata, resolveContractAddress,
   fetchTotalMinted, fetchStageTypes, findPublicStage,
   waitAndMint, mintNow, signAndSend, validateCookie,
-  fetchCollectionStats, transferNFT, fetchBestOffer, fetchUserNFTs,
+  fetchCollectionStats, transferNFT, fetchBestOffer, fetchUserNFTs, acceptOffer,
   printDrop, fmtTime, sleep, getCookie, loadSession, saveSession,
   loadEnv, extractSlug, GRAPHQL_URL, SWAP_HASH, DROP_HASH,
   HEADERS, WIB_OFFSET, SESSION_PATH, ENV_PATH,
@@ -389,6 +389,85 @@ async function fetchUserNFTs(pk, contract, chain = 'base', limit = 20) {
     }
   } catch {}
   return nfts;
+}
+
+// ─── Accept Offer (via Seaport) ───────────────────────────────
+async function acceptOffer(cookie, pk, slug, tokenId, apiKey = '') {
+  // 1. Get full offer order data from OpenSea API v2
+  if (!apiKey) throw new Error('OPENSEA_API_KEY required! Daftar gratis di opensea.io → API Keys');
+
+  // Resolve contract + chain
+  const { contract, chain } = await resolveContractAddress(cookie, slug);
+
+  // Fetch the best offer order
+  const resp = await fetch(
+    `https://api.opensea.io/api/v2/orders/${chain}/seaport/offers?` +
+    `asset_contract_address=${contract}&token_ids=${tokenId}&limit=1&order_by=price&order_direction=desc`,
+    { headers: { accept: 'application/json', 'x-api-key': apiKey, 'user-agent': 'Mozilla/5.0' } }
+  );
+  if (!resp.ok) {
+    const txt = await resp.text();
+    throw new Error(`API error ${resp.status}: ${txt.slice(0,100)}`);
+  }
+  const json = await resp.json();
+  const orders = json.orders || [];
+  if (!orders.length) throw new Error('No active offer found');
+
+  const order = orders[0].order || orders[0]?.protocol_data || orders[0];
+  const signature = orders[0].signature || order.signature;
+  if (!signature) throw new Error('No signature in offer order');
+
+  // 2. Get fulfillment calldata from Seaport
+  // Use the Seaport contract ABI
+  const rpcMap = {
+    ethereum: 'https://ethereum-rpc.publicnode.com',
+    base: 'https://mainnet.base.org',
+    polygon: 'https://polygon-rpc.com',
+    arbitrum: 'https://arb1.arbitrum.io/rpc',
+    optimism: 'https://mainnet.optimism.io',
+    zora: 'https://rpc.zora.energy',
+    avalanche: 'https://api.avax.network/ext/bc/C/rpc',
+    'bnb-chain': 'https://bsc-dataseed.binance.org',
+  };
+  const rpc = rpcMap[chain] || 'https://mainnet.base.org';
+  const provider = new ethers.JsonRpcProvider(rpc);
+  const wallet = new ethers.Wallet(pk, provider);
+
+  // Seaport contract (same on all chains)
+  const SEAPORT = '0x00000000000000ADc04C56Bf30aC9d3c0aAF14dC';
+
+  // Determine order parameters based on API response format
+  const protocolData = orders[0].protocol_data || order;
+
+  // Construct the fulfillArgs for fulfillBasicOrder or fulfillAdvancedOrder
+  // For a standard offer (buyer offers ETH/WETH for NFT):
+  const basicOrderParams = {
+    considerationToken: protocolData.parameters.consideration?.[0]?.token || contract,
+    considerationIdentifier: protocolData.parameters.consideration?.[0]?.identifierOrCriteria || tokenId,
+    considerationAmount: protocolData.parameters.consideration?.[0]?.endAmount || '1',
+    offerer: protocolData.parameters.offerer,
+    zone: protocolData.parameters.zone || '0x0000000000000000000000000000000000000000',
+    offerToken: protocolData.parameters.offer?.[0]?.token || '0x0000000000000000000000000000000000000000',
+    offerIdentifier: protocolData.parameters.offer?.[0]?.identifierOrCriteria || '0',
+    offerAmount: protocolData.parameters.offer?.[0]?.endAmount || '0',
+    basicOrderType: protocolData.parameters.orderType ?? 0,
+    startTime: protocolData.parameters.startTime || '0',
+    endTime: protocolData.parameters.endTime || '0',
+    zoneHash: protocolData.parameters.zoneHash || ethers.ZeroHash,
+    salt: protocolData.parameters.salt || '0',
+    offererConduitKey: protocolData.parameters.conduitKey || ethers.ZeroHash,
+    fulfillerConduitKey: ethers.ZeroHash,
+    signature,
+    recipient: await wallet.getAddress(),
+  };
+
+  const seaport = new ethers.Contract(SEAPORT, [
+    'function fulfillBasicOrder(tuple(address considerationToken, uint256 considerationIdentifier, uint256 considerationAmount, address offerer, address zone, address offerToken, uint256 offerIdentifier, uint256 offerAmount, uint8 basicOrderType, uint256 startTime, uint256 endTime, bytes32 zoneHash, uint256 salt, bytes32 offererConduitKey, bytes32 fulfillerConduitKey, bytes signature, address recipient) external payable returns (bool fulfilled)',
+  ], wallet);
+
+  const tx = await seaport.fulfillBasicOrder(basicOrderParams, { gasLimit: 300000 });
+  const receipt = await tx.wait();
+  return { txHash: tx.hash, receipt };
 }
 
 // ─── Helpers ────────────────────────────────────────────────

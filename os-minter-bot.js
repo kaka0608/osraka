@@ -27,7 +27,7 @@ const TOKEN=process.env.TELEGRAM_BOT_TOKEN||'';
 if(!TOKEN){console.error('❌ TELEGRAM_BOT_TOKEN not set');process.exit(1);}
 const ENCRYPT_PASS=process.env.WALLET_ENCRYPT_KEY||null;
 
-import{fetchDropInfo,fetchCalldata,resolveContractAddress,fetchTotalMinted,fetchStageTypes,findPublicStage,validateCookie,getCookie,fmtTime,sleep,signAndSend,fetchCollectionStats,transferNFT,fetchBestOffer,fetchUserNFTs}from'./os-minter.js';
+import{fetchDropInfo,fetchCalldata,resolveContractAddress,fetchTotalMinted,fetchStageTypes,findPublicStage,validateCookie,getCookie,fmtTime,sleep,signAndSend,fetchCollectionStats,transferNFT,fetchBestOffer,fetchUserNFTs,acceptOffer}from'./os-minter.js';
 
 // ─── Storage ────────────────────────────────────────────────
 function loadJSON(p){try{return JSON.parse(fs.readFileSync(p,'utf-8'))}catch{return {}}}
@@ -336,7 +336,8 @@ async function showHelp(cid){
     `${bold('6. Manage NFT')}\n`+
     `/send <slug> <tokenId> <addr> — kirim NFT ke alamat lain.\n`+
     `/offers <slug> <tokenId> — liat best offer di NFT.\n`+
-    `/myitems <slug> — daftar NFT kamu + offer.\n\n`+
+    `/myitems <slug> — daftar NFT kamu + offer.\n`+
+    `/acceptoffer <slug> <tokenId> — terima best offer (butuh API key).\n\n`+
     `${bold('7. Lainnya')}\n`+
     `/cancel — stop mint.\n`+
     `/history — liat riwayat mint.\n`+
@@ -565,6 +566,29 @@ bot.onText(/^\/myitems(?:\s+(.+))?$/i,async(m,match)=>{
     }
     out += `\nKetik /offers ${slug} <id> utk detail`;
     await bot.sendMessage(cid,out,menuKb());
+  }catch(e){await bot.sendMessage(cid,`❌ ${esc(e.message.slice(0,200))}`,menuKb());}
+});
+
+// ─── /acceptoffer ───────────────────────────────────────────
+bot.onText(/^\/acceptoffer(?:\s+(.+))?$/i,async(m,match)=>{
+  const cid=m.chat.id;logUser(m);incUserCmd(m);
+  const raw=match?.[1]?.trim();
+  if(!raw)return bot.sendMessage(cid,'❌ /acceptoffer <slug> <tokenId>\nButuh OPENSEA_API_KEY di .env',{parse_mode:'HTML'});
+  const parts=raw.split(/\s+/);
+  const slug=extractSlug(parts[0]);
+  if(!slug||!parts[1])return bot.sendMessage(cid,'❌ /acceptoffer <slug> <tokenId>',{parse_mode:'HTML'});
+  const tokenId=parts[1];
+  const uw=getUserWallet(cid);
+  if(!uw)return bot.sendMessage(cid,'❌ Belum register. /register 0x...',{parse_mode:'HTML'});
+  const pk=decryptWallet(uw.privateKey);
+  const apiKey=process.env.OPENSEA_API_KEY||'';
+if(!apiKey)return bot.sendMessage(cid,'❌ Butuh OPENSEA_API_KEY!\nDaftar gratis → https://opensea.io → Developer → API Keys\nTrus tambahin ke file .env:\nOPENSEA_API_KEY=xxx',{parse_mode:'HTML'});
+  await bot.sendMessage(cid,`🔄 ${bold('Accepting best offer')} ${bold(slug)} #${tokenId}...`,{parse_mode:'HTML'});
+  try{
+    const cookie=getCookie();
+    if(!cookie||!await validateCookie(cookie))return bot.sendMessage(cid,'❌ Cookie expired!',{parse_mode:'HTML'});
+    const result=await acceptOffer(cookie,pk,slug,tokenId,apiKey);
+    await bot.sendMessage(cid,`✅ ${bold('Offer accepted!')}\nTX: ${code(result.txHash)}`,resultKb(result.txHash,result.chain||'ethereum'));
   }catch(e){await bot.sendMessage(cid,`❌ ${esc(e.message.slice(0,200))}`,menuKb());}
 });
 
