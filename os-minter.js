@@ -371,7 +371,8 @@ async function waitAndMint(cookie, contractAddr, chain, wallet, pk, drop, opts =
         return;
       }
       console.log(`\n⏳ Nunggu '${s.label || s.stageType || '?'}' buka jam ${fmtTime(s.startTime)} (${waitSecs}s lagi)...`);
-      let lastSupply = null;
+      // Cek supply awal
+      let lastSupply = await fetchTotalMinted(contractAddr, chain);
       let supplyCheckCount = 0;
       let soldOut = false;
       try {
@@ -432,7 +433,7 @@ async function waitAndMint(cookie, contractAddr, chain, wallet, pk, drop, opts =
         return;
       }
       console.log(`\n⏳ Nunggu PUBLIC buka jam ${fmtTime(publicStage.startTime)} (${waitSecs}s lagi)...`);
-      let lastSupply = null;
+      let lastSupply = await fetchTotalMinted(contractAddr, chain);
       let supplyCheckCount = 0;
       let soldOut = false;
       try {
@@ -445,6 +446,7 @@ async function waitAndMint(cookie, contractAddr, chain, wallet, pk, drop, opts =
           if (hrs) msg += `${hrs}h `;
           msg += `${mins}m ${secs2}s`;
           if (lastSupply !== null) msg += ` | ${lastSupply} minted`;
+          else if (lastSupply === null && supplyCheckCount > 0) msg += ` | ? minted`;
           process.stdout.write(`\r   ${msg}   `);
           await sleep(Math.min(1000, waitSecs * 1000));
           waitSecs = Math.floor((publicStage._startDt - new Date()) / 1000);
