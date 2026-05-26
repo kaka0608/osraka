@@ -391,34 +391,46 @@ async function fetchUserNFTs(pk, contract, chain = 'base', limit = 20) {
   return nfts;
 }
 
-// ─── Accept Offer (via Seaport) ───────────────────────────────
+// ─── Accept Offer (via OpenSea API + Seaport) ───────────────
 async function acceptOffer(cookie, pk, slug, tokenId, apiKey = '') {
-  // 1. Get full offer order data from OpenSea API v2
-  if (!apiKey) throw new Error('OPENSEA_API_KEY required! Daftar gratis di opensea.io → API Keys');
+  if (!apiKey) throw new Error('OPENSEA_API_KEY required! Daftar gratis via:\ncurl -X POST https://api.opensea.io/api/v2/auth/keys \\\n  -H "cookie: $(cat ~/.os-session.json | python3 -c \'import sys,json;print(json.load(sys.stdin).get("cookie",""))\')"');
 
-  // Resolve contract + chain
   const { contract, chain } = await resolveContractAddress(cookie, slug);
 
-  // Fetch the best offer order
+  // 1. Get best offer order data + hash
   const resp = await fetch(
-    `https://api.opensea.io/api/v2/orders/${chain}/seaport/offers?` +
-    `asset_contract_address=${contract}&token_ids=${tokenId}&limit=1&order_by=price&order_direction=desc`,
+    `https://api.opensea.io/api/v2/offers/collection/${slug}/nfts/${tokenId}/best`,
     { headers: { accept: 'application/json', 'x-api-key': apiKey, 'user-agent': 'Mozilla/5.0' } }
   );
   if (!resp.ok) {
     const txt = await resp.text();
-    throw new Error(`API error ${resp.status}: ${txt.slice(0,100)}`);
+    throw new Error(`API error ${resp.status}: ${txt.slice(0,150)}`);
   }
-  const json = await resp.json();
-  const orders = json.orders || [];
-  if (!orders.length) throw new Error('No active offer found');
+  const offerData = await resp.json();
+  const orderHash = offerData.order_hash;
+  if (!orderHash) throw new Error('No offer found for this NFT');
 
-  const order = orders[0].order || orders[0]?.protocol_data || orders[0];
-  const signature = orders[0].signature || order.signature;
-  if (!signature) throw new Error('No signature in offer order');
+  // 2. Get fulfillment transaction data from OpenSea API
+  const fullfillResp = await fetch(`https://api.opensea.io/api/v2/offers/fulfillment_data`, {
+    method: 'POST',
+    headers: { accept: 'application/json', 'content-type': 'application/json', 'x-api-key': apiKey },
+    body: JSON.stringify({
+      offer: { hash: orderHash, chain, protocol_address: '0x00000000000000ADc04C56Bf30aC9d3c0aAF14dC' },
+      fulfiller: { address: new ethers.Wallet(pk).address },
+      consideration: { asset_contract_address: contract, token_id: String(tokenId) },
+      units_to_fill: '1',
+      include_optional_creator_fees: false,
+    }),
+  });
+  if (!fullfillResp.ok) {
+    const txt = await fullfillResp.text();
+    throw new Error(`Fulfillment error ${fullfillResp.status}: ${txt.slice(0,150)}`);
+  }
+  const fulfillmentData = await fullfillResp.json();
+  const txData = fulfillmentData?.fulfillment_data?.transaction;
+  if (!txData) throw new Error('No transaction data from fulfillment API');
 
-  // 2. Get fulfillment calldata from Seaport
-  // Use the Seaport contract ABI
+  // 3. Sign and send the transaction
   const rpcMap = {
     ethereum: 'https://ethereum-rpc.publicnode.com',
     base: 'https://mainnet.base.org',
@@ -433,41 +445,14 @@ async function acceptOffer(cookie, pk, slug, tokenId, apiKey = '') {
   const provider = new ethers.JsonRpcProvider(rpc);
   const wallet = new ethers.Wallet(pk, provider);
 
-  // Seaport contract (same on all chains)
-  const SEAPORT = '0x00000000000000ADc04C56Bf30aC9d3c0aAF14dC';
-
-  // Determine order parameters based on API response format
-  const protocolData = orders[0].protocol_data || order;
-
-  // Construct the fulfillArgs for fulfillBasicOrder or fulfillAdvancedOrder
-  // For a standard offer (buyer offers ETH/WETH for NFT):
-  const basicOrderParams = {
-    considerationToken: protocolData.parameters.consideration?.[0]?.token || contract,
-    considerationIdentifier: protocolData.parameters.consideration?.[0]?.identifierOrCriteria || tokenId,
-    considerationAmount: protocolData.parameters.consideration?.[0]?.endAmount || '1',
-    offerer: protocolData.parameters.offerer,
-    zone: protocolData.parameters.zone || '0x0000000000000000000000000000000000000000',
-    offerToken: protocolData.parameters.offer?.[0]?.token || '0x0000000000000000000000000000000000000000',
-    offerIdentifier: protocolData.parameters.offer?.[0]?.identifierOrCriteria || '0',
-    offerAmount: protocolData.parameters.offer?.[0]?.endAmount || '0',
-    basicOrderType: protocolData.parameters.orderType ?? 0,
-    startTime: protocolData.parameters.startTime || '0',
-    endTime: protocolData.parameters.endTime || '0',
-    zoneHash: protocolData.parameters.zoneHash || ethers.ZeroHash,
-    salt: protocolData.parameters.salt || '0',
-    offererConduitKey: protocolData.parameters.conduitKey || ethers.ZeroHash,
-    fulfillerConduitKey: ethers.ZeroHash,
-    signature,
-    recipient: await wallet.getAddress(),
-  };
-
-  const seaport = new ethers.Contract(SEAPORT, [
-    'function fulfillBasicOrder(tuple(address considerationToken, uint256 considerationIdentifier, uint256 considerationAmount, address offerer, address zone, address offerToken, uint256 offerIdentifier, uint256 offerAmount, uint8 basicOrderType, uint256 startTime, uint256 endTime, bytes32 zoneHash, uint256 salt, bytes32 offererConduitKey, bytes32 fulfillerConduitKey, bytes signature, address recipient) external payable returns (bool fulfilled)',
-  ], wallet);
-
-  const tx = await seaport.fulfillBasicOrder(basicOrderParams, { gasLimit: 300000 });
+  const tx = await wallet.sendTransaction({
+    to: txData.to,
+    data: txData.data,
+    value: txData.value || '0x0',
+    gasLimit: txData.gas || 300000,
+  });
   const receipt = await tx.wait();
-  return { txHash: tx.hash, receipt };
+  return { txHash: tx.hash, receipt, chain };
 }
 
 // ─── Helpers ────────────────────────────────────────────────

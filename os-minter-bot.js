@@ -334,10 +334,10 @@ async function showHelp(cid){
 `${bold('5. Lihat Stats NFT')}\n`+
     `/stats https://... — liat floor price, volume, holder, supply.\n\n`+
     `${bold('6. Manage NFT')}\n`+
-    `/send <slug> <tokenId> <addr> — kirim NFT ke alamat lain.\n`+
-    `/offers <slug> <tokenId> — liat best offer di NFT.\n`+
-    `/myitems <slug> — daftar NFT kamu + offer.\n`+
-    `/acceptoffer <slug> <tokenId> — terima best offer (butuh API key).\n\n`+
+    `/send ${code('slug')} ${code('tokenId')} ${code('addr')} — kirim NFT ke alamat lain.\n`+
+    `/offers ${code('slug')} ${code('tokenId')} — liat best offer di NFT.\n`+
+    `/myitems ${code('slug')} — daftar NFT kamu + offer.\n`+
+    `/acceptoffer ${code('slug')} ${code('tokenId')} — terima best offer (butuh API key).\n\n`+
     `${bold('7. Lainnya')}\n`+
     `/cancel — stop mint.\n`+
     `/history — liat riwayat mint.\n`+

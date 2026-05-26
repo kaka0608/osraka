@@ -1,0 +1,35 @@
+{
+  "1233828518": {
+    "chat_id": 1233828518,
+    "username": "Darkside198",
+    "first_name": "Rakatzy",
+    "last_name": null,
+    "first_seen": 1779734310482,
+    "last_seen": 1779753108198,
+    "commands": 22,
+    "wallet": "0xC52790C4dB67ada57CB32EB329079a68906E1D24",
+    "last_cmd": "2026-05-25T23:51:48.198Z"
+  },
+  "7368468279": {
+    "chat_id": 7368468279,
+    "username": "alvertomantap",
+    "first_name": "alvert",
+    "last_name": null,
+    "first_seen": 1779734269668,
+    "last_seen": 1779734861978,
+    "commands": 2,
+    "wallet": null,
+    "last_cmd": "2026-05-25T18:47:41.978Z"
+  },
+  "6313822429": {
+    "chat_id": 6313822429,
+    "username": "styedwin",
+    "first_name": "Setya",
+    "last_name": "Ath",
+    "first_seen": 1779734282829,
+    "last_seen": 1779734282829,
+    "commands": 1,
+    "wallet": null,
+    "last_cmd": "2026-05-25T18:38:02.829Z"
+  }
+}
